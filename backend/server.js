@@ -32,7 +32,9 @@ const { marshall, unmarshall } = require('@aws-sdk/util-dynamodb')
 const PG_API_KEY        = process.env.PG_API_KEY        || 'change-me'
 const COLLECTION_BANNED = process.env.PG_COLLECTION_BANNED || 'hv-playguard-banned'
 const DYNAMO_TABLE      = process.env.PG_DYNAMO_TABLE   || 'hv-playguard-events'
-const AGE_THRESHOLD     = parseInt(process.env.PG_AGE_THRESHOLD  || '18', 10)
+// Default raised to 21 (from 18) to compensate for AWS Rekognition's known
+// tendency to over-age children. VERIFY_AGE verdict flags the ambiguous zone.
+const AGE_THRESHOLD     = parseInt(process.env.PG_AGE_THRESHOLD  || '21', 10)
 const MATCH_THRESHOLD   = parseFloat(process.env.PG_MATCH_THRESHOLD || '90')
 const AWS_REGION        = process.env.AWS_REGION        || 'af-south-1'
 const PORT              = parseInt(process.env.PORT     || '3007', 10)
@@ -192,15 +194,24 @@ fastify.post('/playguard/scan', { preHandler: authHook }, async (request, reply)
 
   const ageRange      = face.AgeRange ?? { Low: 0, High: 0 }
   const isMinor       = ageRange.High < AGE_THRESHOLD
+  // Rekognition over-ages children; if Low < 25 and not already a minor by
+  // our (conservative) threshold, the estimate is considered uncertain and
+  // the operator must verify physical ID.
+  const isAmbiguous   = ageRange.Low < 25 && !isMinor
   const faceConfidence = face.Confidence ?? 0
   const quality       = {
     Brightness: face.Quality?.Brightness ?? 0,
     Sharpness:  face.Quality?.Sharpness  ?? 0,
   }
 
-  let verdict = 'ALLOWED'
-  if (isMinor) verdict = 'MINOR'
-  else if (banResult.detected) verdict = 'BANNED'
+  // Verdict priority: BANNED > MINOR > VERIFY_AGE > ALLOWED
+  const verdict = banResult.detected
+    ? 'BANNED'
+    : isMinor
+      ? 'MINOR'
+      : isAmbiguous
+        ? 'VERIFY_AGE'
+        : 'ALLOWED'
 
   const result = {
     scanId,
@@ -209,7 +220,15 @@ fastify.post('/playguard/scan', { preHandler: authHook }, async (request, reply)
     platform:  request.body?.platform  ?? '',
     verdict,
     access: verdict === 'ALLOWED',
-    age: { range: ageRange, isMinor, threshold: AGE_THRESHOLD },
+    age: {
+      range: ageRange,
+      isMinor,
+      isAmbiguous,
+      threshold: AGE_THRESHOLD,
+      ambiguityNote: isAmbiguous
+        ? 'AWS Rekognition age estimate uncertain — physical ID check required'
+        : null,
+    },
     ban: banResult,
     quality,
     faceConfidence,

@@ -52,6 +52,7 @@ export default function EventsPage() {
               <select value={verdict} onChange={e => setVerdict(e.target.value)}>
                 <option value="">All</option>
                 <option value="ALLOWED">ALLOWED</option>
+                <option value="VERIFY_AGE">VERIFY_AGE</option>
                 <option value="MINOR">MINOR</option>
                 <option value="BANNED">BANNED</option>
               </select>
@@ -86,7 +87,7 @@ export default function EventsPage() {
                   <tr key={i}>
                     <td>{e.scanId?.slice(0, 8)}...</td>
                     <td>
-                      <span className={`badge ${e.verdict === 'ALLOWED' ? 'success' : e.verdict === 'MINOR' ? 'warning' : 'danger'}`}>
+                      <span className={`badge ${e.verdict === 'ALLOWED' ? 'success' : (e.verdict === 'MINOR' || e.verdict === 'VERIFY_AGE') ? 'warning' : 'danger'}`}>
                         {e.verdict}
                       </span>
                     </td>

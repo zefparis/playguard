@@ -1,12 +1,53 @@
 'use client'
 
+// Verdict color mapping:
+//   ALLOWED     → green
+//   VERIFY_AGE  → amber (distinct from MINOR)
+//   MINOR       → orange
+//   BANNED      → red
+const VERDICT_STYLES: Record<string, { bg: string; fg: string; border: string; icon: string; title: string }> = {
+  ALLOWED:    { bg: 'rgba(34,197,94,0.12)',  fg: '#22c55e', border: '#22c55e', icon: '✅', title: 'ALLOWED' },
+  VERIFY_AGE: { bg: 'rgba(245,158,11,0.12)', fg: '#f59e0b', border: '#f59e0b', icon: '⚠️', title: 'VERIFY AGE' },
+  MINOR:      { bg: 'rgba(249,115,22,0.14)', fg: '#f97316', border: '#f97316', icon: '🚫', title: 'MINOR' },
+  BANNED:     { bg: 'rgba(239,68,68,0.14)',  fg: '#ef4444', border: '#ef4444', icon: '⛔', title: 'BANNED' },
+}
+
 export function VerdictCard({ result }: { result: any }) {
+  const v: string = result.verdict
+  const style = VERDICT_STYLES[v] ?? VERDICT_STYLES.ALLOWED
+
   return (
     <div className="verdict-card">
       <div className="header">
-        <span className={`verdict ${result.verdict}`}>{result.verdict}</span>
+        <span className={`verdict ${v}`}>{v}</span>
         <span className="timestamp">{new Date(result.timestamp).toLocaleString()}</span>
       </div>
+
+      {v === 'VERIFY_AGE' && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 14,
+            padding: 12,
+            borderRadius: 8,
+            background: style.bg,
+            borderLeft: `4px solid ${style.border}`,
+            color: style.fg,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14 }}>
+            <span>{style.icon}</span>
+            <span>{style.title}</span>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.45, color: style.fg }}>
+            Age range: {result.age.range.Low}–{result.age.range.High} yrs — Physical ID required
+          </div>
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-dim, #94a3b8)' }}>
+            {result.age.ambiguityNote ?? 'AWS estimate uncertain. Request ID document before granting access.'}
+          </div>
+        </div>
+      )}
+
       <div className="details">
         <div className="detail">
           <span className="label">Access</span>
@@ -19,6 +60,10 @@ export function VerdictCard({ result }: { result: any }) {
         <div className="detail">
           <span className="label">Minor</span>
           <span className="value">{result.age.isMinor ? 'YES' : 'NO'}</span>
+        </div>
+        <div className="detail">
+          <span className="label">Ambiguous</span>
+          <span className="value">{result.age.isAmbiguous ? 'YES' : 'NO'}</span>
         </div>
         <div className="detail">
           <span className="label">Ban Detected</span>
