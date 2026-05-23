@@ -57,7 +57,19 @@ const STRIP_RES = new Set([
 export default async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
 
-  if (!url.pathname.startsWith(ALLOWED_PREFIX)) {
+  // Vercel rewrites /api/proxy/<sub-path> → /api/proxy?_subpath=<sub-path>
+  // so the function (which is bound only to /api/proxy) can serve every
+  // sub-path in a single file. After the rewrite, url.pathname is "/api/proxy"
+  // and the original sub-path lives in the _subpath query param. We still
+  // accept the un-rewritten form (if anyone calls /api/proxy/foo directly,
+  // e.g. during local `vercel dev`) by falling back to pathname stripping.
+  const subPathFromQuery = url.searchParams.get('_subpath');
+  let subPath: string;
+  if (subPathFromQuery !== null) {
+    subPath = subPathFromQuery ? `/${subPathFromQuery.replace(/^\/+/, '')}` : '/';
+  } else if (url.pathname.startsWith(ALLOWED_PREFIX)) {
+    subPath = url.pathname.slice(ALLOWED_PREFIX.length) || '/';
+  } else {
     return json({ error: 'Not found' }, 404);
   }
 
@@ -71,9 +83,14 @@ export default async function handler(req: Request): Promise<Response> {
     );
   }
 
-  // Build the upstream URL preserving path + query.
-  const subPath = url.pathname.slice(ALLOWED_PREFIX.length) || '/';
-  const upstreamUrl = `${apiBase.replace(/\/$/, '')}${subPath}${url.search}`;
+  // Strip the synthetic _subpath param before forwarding so upstream never
+  // sees it. Preserve every other querystring param verbatim.
+  const fwdSearch = new URLSearchParams(url.search);
+  fwdSearch.delete('_subpath');
+  const fwdSearchStr = fwdSearch.toString();
+  const upstreamUrl = `${apiBase.replace(/\/$/, '')}${subPath}${
+    fwdSearchStr ? `?${fwdSearchStr}` : ''
+  }`;
 
   // Filter request headers.
   const fwdHeaders = new Headers();
