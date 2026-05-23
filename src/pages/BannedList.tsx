@@ -1,18 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getBans, unbanPlayer } from '../services/api'
-
-interface BanRecord {
-  face_id: string
-  external_id: string
-  reason: string
-  operator: string
-  banned_at: string
-}
+import { getBans, unbanPlayer, type BackendBan } from '../services/api'
 
 export function BannedList() {
   const nav = useNavigate()
-  const [bans, setBans] = useState<BanRecord[]>([])
+  const [bans, setBans] = useState<BackendBan[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [unbanning, setUnbanning] = useState<string | null>(null)
@@ -26,7 +18,7 @@ export function BannedList() {
     setError(null)
     try {
       const { bans: b } = await getBans()
-      setBans(b)
+      setBans(b ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -39,7 +31,7 @@ export function BannedList() {
     setUnbanning(faceId)
     try {
       await unbanPlayer(faceId)
-      setBans(prev => prev.filter(b => b.face_id !== faceId))
+      setBans(prev => prev.filter(b => b.faceId !== faceId))
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Unban failed')
     } finally {
@@ -72,30 +64,30 @@ export function BannedList() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
         {bans.map(b => (
-          <div key={b.face_id} className="card" style={{ padding: '16px 20px' }}>
+          <div key={b.faceId} className="card" style={{ padding: '16px 20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{b.external_id}</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{b.externalId}</div>
                 <div style={{ fontSize: 12, color: 'var(--grey)', marginBottom: 2 }}>
-                  Reason: {b.reason}
+                  Reason: {b.reason || '—'}
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--grey)', marginBottom: 2 }}>
-                  Operator: {b.operator}
+                  Operator: {b.operator || '—'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--border)', fontFamily: 'monospace', marginTop: 6 }}>
-                  {b.face_id.slice(0, 20)}…
+                  {b.faceId.slice(0, 20)}…
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--grey)', marginTop: 4 }}>
-                  {new Date(b.banned_at).toLocaleDateString()}
+                  {b.bannedAt ? new Date(b.bannedAt).toLocaleDateString() : '—'}
                 </div>
               </div>
               <button
                 className="btn btn-danger"
                 style={{ width: 'auto', padding: '8px 14px', fontSize: 13, marginLeft: 12 }}
-                disabled={unbanning === b.face_id}
-                onClick={() => handleUnban(b.face_id)}
+                disabled={unbanning === b.faceId}
+                onClick={() => handleUnban(b.faceId)}
               >
-                {unbanning === b.face_id ? '…' : 'Unban'}
+                {unbanning === b.faceId ? '…' : 'Unban'}
               </button>
             </div>
           </div>

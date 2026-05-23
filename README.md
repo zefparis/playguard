@@ -20,17 +20,23 @@ PlayGuard runs both checks in parallel and returns a single `verdict`: **ALLOWED
 
 ```
 playguard/
-├── backend/          ← Fastify server (port 3007), Node.js
+├── src/              ← Vite + React 18 SPA (operator UI, deployed on Vercel)
+│   ├── pages/        ← Home, Scan, BannedList, AddBan, Events
+│   ├── services/api.ts
+│   └── types.ts      ← Shared TypeScript types (ScanResult, BanRecord)
+├── api/proxy.ts      ← Vercel Edge Function. Holds PG_API_KEY server-side
+│                       and forwards /api/proxy/* to the upstream backend.
+├── backend/          ← Fastify server (port 3007), Node.js, Rekognition + DynamoDB
 │   ├── server.js
 │   └── package.json
-├── dashboard/        ← Next.js operator dashboard
-│   ├── app/
-│   ├── components/
-│   └── lib/
-├── types.ts          ← Shared TypeScript types
 ├── .env.example
 └── README.md
 ```
+
+**Security model**: the SPA never holds the API key. It calls same-origin
+`/api/proxy/playguard/*`. The edge function injects `X-API-Key` and forwards
+to `PG_API_URL`. CORS on the backend is whitelisted to the SPA origin and
+the Congo Gaming domains.
 
 ---
 
@@ -153,18 +159,30 @@ The mode is reported in `GET /playguard/status` → `mode`.
 ## Development
 
 ```bash
-# Backend
+# Backend (Fastify, AWS Rekognition + DynamoDB)
 cd backend
 npm install
-cp ../.env.example .env   # fill in your values
+cp ../.env.example .env   # fill in your values; PG_API_KEY MUST be set or boot fails
 npm run dev               # node --watch server.js on port 3007
 
-# Dashboard
-cd dashboard
+# SPA (Vite)
+cd ..
 npm install
-cp ../.env.example .env.local   # set NEXT_PUBLIC_API_URL + NEXT_PUBLIC_PG_API_KEY
-npm run dev               # http://localhost:3008
+npm run dev               # http://localhost:3007 (Vite dev server)
+# In dev, /api/proxy is unavailable. Either deploy a preview to Vercel or
+# point the SPA temporarily at the backend (edit src/services/api.ts).
 ```
+
+## Deployment (Vercel)
+
+Set these env vars in the Vercel project (Production + Preview, **not**
+in any committed file):
+
+| Var            | Description                                     |
+|----------------|-------------------------------------------------|
+| `PG_API_URL`   | Upstream PlayGuard backend URL                  |
+| `PG_API_KEY`   | Real API key — never exposed to the browser     |
+| `PG_TENANT_ID` | (Optional) injected on every JSON request body  |
 
 ---
 

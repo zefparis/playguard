@@ -1,27 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEvents } from '../services/api'
+import { getEvents, type BackendEvent } from '../services/api'
 
-type Verdict = 'ALL' | 'ALLOWED' | 'MINOR' | 'BANNED'
-
-interface Event {
-  id: string
-  verdict: 'ALLOWED' | 'MINOR' | 'BANNED'
-  age_low: number
-  age_high: number
-  is_minor: boolean
-  ban_detected: boolean
-  ban_similarity: number | null
-  face_confidence: number
-  player_id: string | null
-  board_id: string | null
-  platform: string | null
-  scanned_at: string
-}
+type Verdict = 'ALL' | 'ALLOWED' | 'VERIFY_AGE' | 'MINOR' | 'BANNED'
 
 export function Events() {
   const nav = useNavigate()
-  const [events, setEvents] = useState<Event[]>([])
+  const [events, setEvents] = useState<BackendEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Verdict>('ALL')
@@ -45,6 +30,7 @@ export function Events() {
 
   const badgeClass: Record<string, string> = {
     ALLOWED: 'badge-green',
+    VERIFY_AGE: 'badge-amber',
     MINOR: 'badge-amber',
     BANNED: 'badge-red',
   }
@@ -58,7 +44,7 @@ export function Events() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, width: '100%', flexWrap: 'wrap' }}>
-        {(['ALL', 'ALLOWED', 'MINOR', 'BANNED'] as Verdict[]).map(v => (
+        {(['ALL', 'ALLOWED', 'VERIFY_AGE', 'MINOR', 'BANNED'] as Verdict[]).map(v => (
           <button
             key={v}
             onClick={() => setFilter(v)}
@@ -66,9 +52,14 @@ export function Events() {
               padding: '6px 14px', borderRadius: 20, cursor: 'pointer',
               fontWeight: 600, fontSize: 12, letterSpacing: '0.05em',
               background: filter === v
-                ? v === 'ALLOWED' ? 'var(--green)' : v === 'MINOR' ? 'var(--amber)' : v === 'BANNED' ? 'var(--red)' : 'var(--blue)'
+                ? v === 'ALLOWED' ? 'var(--green)'
+                  : v === 'VERIFY_AGE' || v === 'MINOR' ? 'var(--amber)'
+                  : v === 'BANNED' ? 'var(--red)'
+                  : 'var(--blue)'
                 : 'var(--bg3)',
-              color: filter === v ? (v === 'MINOR' ? '#0a0f1e' : '#fff') : 'var(--grey)',
+              color: filter === v
+                ? (v === 'VERIFY_AGE' || v === 'MINOR' ? '#0a0f1e' : '#fff')
+                : 'var(--grey)',
               border: `1px solid ${filter === v ? 'transparent' : 'var(--border)'}`,
             }}
           >
@@ -86,34 +77,40 @@ export function Events() {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%' }}>
         {events.map(ev => (
-          <div key={ev.id} className="card" style={{ padding: '14px 18px' }}>
+          <div key={ev.scanId} className="card" style={{ padding: '14px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span className={`badge ${badgeClass[ev.verdict]}`} style={{ marginBottom: 0 }}>
+              <span className={`badge ${badgeClass[ev.verdict] ?? 'badge-blue'}`} style={{ marginBottom: 0 }}>
                 {ev.verdict}
               </span>
               <span style={{ fontSize: 11, color: 'var(--grey)' }}>
-                {new Date(ev.scanned_at).toLocaleString()}
+                {new Date(ev.timestamp).toLocaleString()}
               </span>
             </div>
             <div className="metric-row" style={{ paddingTop: 6 }}>
               <span className="metric-label">Age range</span>
-              <span style={{ fontSize: 13, color: 'var(--white)' }}>{ev.age_low}–{ev.age_high}</span>
+              <span style={{ fontSize: 13, color: 'var(--white)' }}>
+                {ev.age.range.Low}–{ev.age.range.High}
+              </span>
             </div>
-            {ev.player_id && (
+            {ev.playerId && (
               <div className="metric-row">
                 <span className="metric-label">Player ID</span>
-                <span style={{ fontSize: 13, color: 'var(--white)' }}>{ev.player_id}</span>
+                <span style={{ fontSize: 13, color: 'var(--white)' }}>{ev.playerId}</span>
               </div>
             )}
-            {ev.ban_detected && (
+            {ev.ban?.detected && (
               <div className="metric-row">
                 <span className="metric-label">Ban similarity</span>
-                <span style={{ fontSize: 13, color: 'var(--red)' }}>{ev.ban_similarity?.toFixed(1)}%</span>
+                <span style={{ fontSize: 13, color: 'var(--red)' }}>
+                  {ev.ban.similarity?.toFixed(1)}%
+                </span>
               </div>
             )}
             <div className="metric-row" style={{ borderBottom: 'none', paddingBottom: 0 }}>
               <span className="metric-label">Confidence</span>
-              <span style={{ fontSize: 13, color: 'var(--grey)' }}>{ev.face_confidence.toFixed(1)}%</span>
+              <span style={{ fontSize: 13, color: 'var(--grey)' }}>
+                {ev.faceConfidence.toFixed(1)}%
+              </span>
             </div>
           </div>
         ))}

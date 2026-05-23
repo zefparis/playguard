@@ -2,6 +2,8 @@
 
 const Fastify = require('fastify')
 const multipart = require('@fastify/multipart')
+const rateLimit = require('@fastify/rate-limit')
+const cors = require('@fastify/cors')
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -27,9 +29,17 @@ const {
 
 const { marshall, unmarshall } = require('@aws-sdk/util-dynamodb')
 
+// ── Boot guard ────────────────────────────────────────────────────────────────
+// Refuse to start if no API key is configured. The legacy default value
+// 'change-me' is a known footgun — it must be replaced explicitly.
+if (!process.env.PG_API_KEY || process.env.PG_API_KEY === 'change-me') {
+  console.error('FATAL: PG_API_KEY not set (or still set to the default "change-me"). Refusing to start.')
+  process.exit(1)
+}
+
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const PG_API_KEY        = process.env.PG_API_KEY        || 'change-me'
+const PG_API_KEY        = process.env.PG_API_KEY
 const COLLECTION_BANNED = process.env.PG_COLLECTION_BANNED || 'hv-playguard-banned'
 const DYNAMO_TABLE      = process.env.PG_DYNAMO_TABLE   || 'hv-playguard-events'
 // Default raised to 21 (from 18) to compensate for AWS Rekognition's known
@@ -153,35 +163,89 @@ async function authHook (request, reply) {
 
 const fastify = Fastify({ logger: true })
 
-fastify.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } })
+// CORS — explicit whitelist instead of wildcard. Additional origins can be
+// added via the PG_CORS_EXTRA env var (comma-separated).
+const CORS_ORIGINS = [
+  'https://playguard.vercel.app',
+  'https://congogaming.com',
+  'https://www.congogaming.com',
+  ...((process.env.PG_CORS_EXTRA || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)),
+]
 
-fastify.addHook('onSend', async (_request, reply) => {
-  reply.header('Access-Control-Allow-Origin', '*')
-  reply.header('Access-Control-Allow-Headers', 'Content-Type, x-playguard-key')
-  reply.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+fastify.register(cors, {
+  origin: (origin, cb) => {
+    // Allow same-origin / curl / server-to-server (no Origin header).
+    if (!origin) return cb(null, true)
+    if (CORS_ORIGINS.includes(origin)) return cb(null, true)
+    return cb(new Error(`Origin not allowed: ${origin}`), false)
+  },
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-playguard-key', 'X-API-Key'],
+  credentials: false,
+  maxAge: 600,
 })
 
-fastify.addHook('onRequest', async (request, reply) => {
-  if (request.method === 'OPTIONS') return reply.code(204).send()
+fastify.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } })
+
+// Global rate limit (lenient default). Stricter per-route limit is applied
+// to /playguard/scan below.
+fastify.register(rateLimit, {
+  max: 120,
+  timeWindow: '1 minute',
+  // Trust the x-forwarded-for chain when running behind Render / Vercel.
+  keyGenerator: (req) =>
+    req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip,
 })
 
 // ── POST /playguard/scan ──────────────────────────────────────────────────────
 
-fastify.post('/playguard/scan', { preHandler: authHook }, async (request, reply) => {
+fastify.post(
+  '/playguard/scan',
+  {
+    preHandler: authHook,
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
   const scanId    = crypto.randomUUID()
   const timestamp = new Date().toISOString()
   let imageBytes
+  // Metadata fields are extracted from the multipart 'field' parts when
+  // applicable, falling back to JSON body fields otherwise. Without this
+  // loop, multipart scans silently dropped playerId/boardId/platform —
+  // breaking the audit trail for board-side compliance reporting.
+  let metaFromMultipart = null
 
   const contentType = request.headers['content-type'] ?? ''
 
   if (contentType.includes('multipart/form-data')) {
-    const data = await request.file()
-    if (!data) return reply.code(400).send({ error: 'No file uploaded' })
-    imageBytes = await data.toBuffer()
+    metaFromMultipart = { playerId: '', boardId: '', platform: '' }
+    let fileBuffer = null
+    for await (const part of request.parts()) {
+      if (part.type === 'file' && (part.fieldname === 'image' || part.fieldname === 'selfie')) {
+        fileBuffer = await part.toBuffer()
+      } else if (part.type === 'field') {
+        const v = typeof part.value === 'string' ? part.value : ''
+        if (part.fieldname === 'playerId' || part.fieldname === 'player_id') metaFromMultipart.playerId = v
+        else if (part.fieldname === 'boardId' || part.fieldname === 'board_id') metaFromMultipart.boardId = v
+        else if (part.fieldname === 'platform') metaFromMultipart.platform = v
+      }
+    }
+    if (!fileBuffer) return reply.code(400).send({ error: 'No file uploaded (field name: image)' })
+    imageBytes = fileBuffer
   } else {
     const body = request.body
-    if (!body?.image) return reply.code(400).send({ error: 'Missing image field' })
-    imageBytes = Buffer.from(cleanBase64(body.image), 'base64')
+    // Accept both 'image' (legacy) and 'selfie_b64' (SPA contract).
+    const b64 = body?.image ?? body?.selfie_b64
+    if (!b64) return reply.code(400).send({ error: 'Missing image field (image | selfie_b64)' })
+    imageBytes = Buffer.from(cleanBase64(b64), 'base64')
   }
 
   const [faceDetails, banResult] = await Promise.all([
@@ -213,11 +277,17 @@ fastify.post('/playguard/scan', { preHandler: authHook }, async (request, reply)
         ? 'VERIFY_AGE'
         : 'ALLOWED'
 
+  // Resolve metadata across both transport flavours.
+  const reqBody = request.body || {}
+  const playerId  = metaFromMultipart?.playerId || reqBody.playerId || reqBody.player_id || ''
+  const boardId   = metaFromMultipart?.boardId  || reqBody.boardId  || reqBody.board_id  || ''
+  const platform  = metaFromMultipart?.platform || reqBody.platform || ''
+
   const result = {
     scanId,
-    playerId:  request.body?.playerId  ?? '',
-    boardId:   request.body?.boardId   ?? '',
-    platform:  request.body?.platform  ?? '',
+    playerId,
+    boardId,
+    platform,
     verdict,
     access: verdict === 'ALLOWED',
     age: {
@@ -249,12 +319,18 @@ fastify.post('/playguard/scan', { preHandler: authHook }, async (request, reply)
   }
 
   return reply.send({ success: true, result })
-})
+  },
+)
 
 // ── POST /playguard/ban ───────────────────────────────────────────────────────
 
 fastify.post('/playguard/ban', { preHandler: authHook }, async (request, reply) => {
-  const { image, externalId, reason = '', operator = '' } = request.body ?? {}
+  // Accept both legacy ({ image, externalId }) and SPA ({ selfie_b64, external_id }) shapes.
+  const body = request.body ?? {}
+  const image = body.image ?? body.selfie_b64
+  const externalId = body.externalId ?? body.external_id
+  const reason = body.reason ?? ''
+  const operator = body.operator ?? ''
   if (!image || !externalId) return reply.code(400).send({ error: 'Missing image or externalId' })
 
   const imageBytes = Buffer.from(cleanBase64(image), 'base64')
@@ -411,11 +487,11 @@ fastify.post('/playguard/sync', { preHandler: authHook }, async (_request, reply
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
+// Initialise AWS resources BEFORE accepting traffic. Otherwise the server
+// briefly serves requests while Rekognition collection / DynamoDB checks
+// are still running — leading to spurious 'COLLECT mode' responses for
+// the first scans after a cold-start.
 async function bootstrap () {
-  await fastify.listen({ port: PORT, host: '0.0.0.0' })
-  fastify.log.info(`🛡️  PlayGuard backend running on port ${PORT}`)
-  fastify.log.info(`   Region: ${AWS_REGION} | Collection: ${COLLECTION_BANNED}`)
-
   try {
     await ensureCollection()
   } catch (e) {
@@ -423,6 +499,12 @@ async function bootstrap () {
   }
 
   await initDynamo()
+
+  await fastify.listen({ port: PORT, host: '0.0.0.0' })
+  fastify.log.info(`🛡️  PlayGuard backend running on port ${PORT}`)
+  fastify.log.info(`   Region: ${AWS_REGION} | Collection: ${COLLECTION_BANNED}`)
+  fastify.log.info(`   CORS origins: ${CORS_ORIGINS.join(', ')}`)
+  fastify.log.info(`   Mode: ${dynamoAvailable ? 'UPLOAD' : 'COLLECT'}`)
 }
 
 bootstrap().catch(e => {
