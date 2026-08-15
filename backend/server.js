@@ -154,7 +154,20 @@ async function findBanSk (faceId) {
 // ── Auth hook ─────────────────────────────────────────────────────────────────
 
 async function authHook (request, reply) {
-  if (request.headers['x-playguard-key'] !== PG_API_KEY) {
+  const provided = request.headers['x-playguard-key']
+  if (typeof provided !== 'string' || !provided) {
+    return reply.code(401).send({ error: 'Unauthorized' })
+  }
+  const authBuf = Buffer.from(provided)
+  const expectedBuf = Buffer.from(PG_API_KEY)
+  // Length mismatch → reject immediately without calling timingSafeEqual
+  // (it throws on length mismatch, which would leak timing info and crash
+  // the handler if uncaught).
+  let isAuthorized = false
+  if (authBuf.length === expectedBuf.length) {
+    isAuthorized = crypto.timingSafeEqual(authBuf, expectedBuf)
+  }
+  if (!isAuthorized) {
     return reply.code(401).send({ error: 'Unauthorized' })
   }
 }
