@@ -187,15 +187,19 @@ label {
   text-align: center;
   margin-bottom: 20px;
 }
-.verdict-block.ALLOWED { background: rgba(34,197,94,0.10); border: 1px solid rgba(34,197,94,0.3); }
-.verdict-block.MINOR   { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.3); }
-.verdict-block.BANNED  { background: rgba(239,68,68,0.10);  border: 1px solid rgba(239,68,68,0.3); }
+.verdict-block.ALLOWED          { background: rgba(34,197,94,0.10);  border: 1px solid rgba(34,197,94,0.3); }
+.verdict-block.MINOR            { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.3); }
+.verdict-block.BANNED           { background: rgba(239,68,68,0.10);  border: 1px solid rgba(239,68,68,0.3); }
+.verdict-block.VERIFY_AGE       { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.3); }
+.verdict-block.BAN_CHECK_FAILED { background: rgba(239,68,68,0.10);  border: 1px solid rgba(239,68,68,0.3); }
 
 .verdict-icon  { font-size: 52px; margin-bottom: 8px; }
 .verdict-label { font-size: 28px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
-.verdict-label.ALLOWED { color: var(--green); }
-.verdict-label.MINOR   { color: var(--amber); }
-.verdict-label.BANNED  { color: var(--red); }
+.verdict-label.ALLOWED          { color: var(--green); }
+.verdict-label.MINOR            { color: var(--amber); }
+.verdict-label.BANNED           { color: var(--red); }
+.verdict-label.VERIFY_AGE       { color: var(--amber); }
+.verdict-label.BAN_CHECK_FAILED { color: var(--red); }
 
 @keyframes pulse {
   0%, 100% { transform: scale(1); opacity: 1; }

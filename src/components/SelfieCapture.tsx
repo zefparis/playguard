@@ -12,9 +12,18 @@ export function SelfieCapture({ onCapture, loading, actionLabel = 'Scan' }: Prop
   const { videoRef, ready, error, capture, isInitializing } = useCamera()
   const [captured, setCaptured] = useState<string | null>(null)
 
+  // Capture only freezes the preview — the frame is submitted to the parent
+  // via onCapture() when the operator presses Confirm. Previously Confirm
+  // re-captured a *new* live frame and Scan submitted on first click, which
+  // meant the previewed photo was never the one sent, and a second
+  // (billable) scan fired on confirm.
   function handleCapture() {
     const b64 = capture()
-    if (b64) { setCaptured(b64); onCapture(b64) }
+    if (b64) setCaptured(b64)
+  }
+
+  function handleConfirm() {
+    if (captured) onCapture(captured)
   }
 
   if (error) return (
@@ -62,7 +71,7 @@ export function SelfieCapture({ onCapture, loading, actionLabel = 'Scan' }: Prop
           <button className="btn btn-outline" onClick={() => setCaptured(null)} disabled={loading}>
             Retake
           </button>
-          <button className="btn btn-primary" onClick={handleCapture} disabled={loading}>
+          <button className="btn btn-primary" onClick={handleConfirm} disabled={loading}>
             {loading ? 'Processing...' : 'Confirm'}
           </button>
         </div>

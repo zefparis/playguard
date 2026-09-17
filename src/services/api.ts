@@ -89,30 +89,65 @@ export async function getStatus(): Promise<{
   return res.json()
 }
 
-// Backend event shape (camelCase as written by Fastify in backend/server.js).
+// Event shape consumed by the UI. The production backend returns raw
+// playguard_events rows in snake_case — mapEvent() normalizes them here so
+// components never touch DB column names.
 export interface BackendEvent {
   scanId: string
-  verdict: 'ALLOWED' | 'MINOR' | 'BANNED' | 'VERIFY_AGE'
+  verdict: 'ALLOWED' | 'MINOR' | 'BANNED' | 'VERIFY_AGE' | 'BAN_CHECK_FAILED'
   access: boolean
   age: {
     range: { Low: number; High: number }
     isMinor: boolean
-    isAmbiguous?: boolean
-    threshold: number
-    ambiguityNote?: string | null
   }
   ban: {
     detected: boolean
     similarity?: number
     faceId?: string
-    externalId?: string
   }
-  quality?: { Brightness: number; Sharpness: number }
   faceConfidence: number
   timestamp: string
   playerId?: string
   boardId?: string
   platform?: string
+}
+
+interface EventRow {
+  id: string
+  verdict: BackendEvent['verdict']
+  age_low: number | null
+  age_high: number | null
+  is_minor: boolean | null
+  ban_detected: boolean | null
+  ban_face_id: string | null
+  ban_similarity: number | null
+  face_confidence: number | null
+  scanned_at: string
+  player_id: string | null
+  board_id: string | null
+  platform: string | null
+}
+
+function mapEvent(r: EventRow): BackendEvent {
+  return {
+    scanId: r.id,
+    verdict: r.verdict,
+    access: r.verdict === 'ALLOWED',
+    age: {
+      range: { Low: r.age_low ?? 0, High: r.age_high ?? 0 },
+      isMinor: r.is_minor ?? false,
+    },
+    ban: {
+      detected: r.ban_detected ?? false,
+      similarity: r.ban_similarity ?? undefined,
+      faceId: r.ban_face_id ?? undefined,
+    },
+    faceConfidence: r.face_confidence ?? 0,
+    timestamp: r.scanned_at,
+    playerId: r.player_id ?? undefined,
+    boardId: r.board_id ?? undefined,
+    platform: r.platform ?? undefined,
+  }
 }
 
 export async function getEvents(
@@ -126,17 +161,36 @@ export async function getEvents(
     signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Events failed: ${res.status}`)
-  return res.json()
+  const data = (await res.json()) as { success: boolean; events: EventRow[]; source?: string }
+  return { ...data, events: (data.events ?? []).map(mapEvent) }
 }
 
-// Ban list entry as returned by the backend (camelCase, matching IndexFaces
-// + the BAN# DynamoDB record written by /playguard/ban).
+// Ban list entry for the UI. Rows come back as playguard_bans snake_case —
+// mapBan() normalizes them (face_id → faceId, banned_at → bannedAt, ...).
 export interface BackendBan {
   faceId: string
   externalId: string
   reason: string
   operator: string
   bannedAt: string
+}
+
+interface BanRow {
+  face_id: string
+  external_id: string
+  reason: string
+  operator: string
+  banned_at: string
+}
+
+function mapBan(r: BanRow): BackendBan {
+  return {
+    faceId: r.face_id,
+    externalId: r.external_id,
+    reason: r.reason,
+    operator: r.operator,
+    bannedAt: r.banned_at,
+  }
 }
 
 export async function getBans(
@@ -146,5 +200,6 @@ export async function getBans(
     signal: AbortSignal.timeout(20_000),
   })
   if (!res.ok) throw new Error(`Bans failed: ${res.status}`)
-  return res.json()
+  const data = (await res.json()) as { success: boolean; bans: BanRow[] }
+  return { ...data, bans: (data.bans ?? []).map(mapBan) }
 }

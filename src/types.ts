@@ -1,4 +1,4 @@
-export type PlayGuardVerdict = 'ALLOWED' | 'MINOR' | 'BANNED' | 'VERIFY_AGE';
+export type PlayGuardVerdict = 'ALLOWED' | 'MINOR' | 'BANNED' | 'VERIFY_AGE' | 'BAN_CHECK_FAILED';
 
 export interface ScanResult {
   scanId: string;
@@ -14,8 +14,8 @@ export interface ScanResult {
     threshold: number;
     ambiguityNote: string | null;
   };
-  ban: { detected: boolean; similarity?: number; faceId?: string; externalId?: string };
-  quality: { Brightness: number; Sharpness: number };
+  ban: { detected: boolean; checkFailed?: boolean; similarity?: number; faceId?: string; externalId?: string };
+  quality?: { Brightness: number; Sharpness: number };
   faceConfidence: number;
   timestamp: string;
 }

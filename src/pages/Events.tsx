@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getEvents, type BackendEvent } from '../services/api'
 
-type Verdict = 'ALL' | 'ALLOWED' | 'VERIFY_AGE' | 'MINOR' | 'BANNED'
+type Verdict = 'ALL' | 'ALLOWED' | 'VERIFY_AGE' | 'BAN_CHECK_FAILED' | 'MINOR' | 'BANNED'
 
 export function Events() {
   const nav = useNavigate()
@@ -31,6 +31,7 @@ export function Events() {
   const badgeClass: Record<string, string> = {
     ALLOWED: 'badge-green',
     VERIFY_AGE: 'badge-amber',
+    BAN_CHECK_FAILED: 'badge-red',
     MINOR: 'badge-amber',
     BANNED: 'badge-red',
   }
@@ -44,7 +45,7 @@ export function Events() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, width: '100%', flexWrap: 'wrap' }}>
-        {(['ALL', 'ALLOWED', 'VERIFY_AGE', 'MINOR', 'BANNED'] as Verdict[]).map(v => (
+        {(['ALL', 'ALLOWED', 'VERIFY_AGE', 'BAN_CHECK_FAILED', 'MINOR', 'BANNED'] as Verdict[]).map(v => (
           <button
             key={v}
             onClick={() => setFilter(v)}
@@ -54,7 +55,7 @@ export function Events() {
               background: filter === v
                 ? v === 'ALLOWED' ? 'var(--green)'
                   : v === 'VERIFY_AGE' || v === 'MINOR' ? 'var(--amber)'
-                  : v === 'BANNED' ? 'var(--red)'
+                  : v === 'BANNED' || v === 'BAN_CHECK_FAILED' ? 'var(--red)'
                   : 'var(--blue)'
                 : 'var(--bg3)',
               color: filter === v

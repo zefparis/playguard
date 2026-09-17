@@ -27,12 +27,14 @@ export function Scan() {
     VERIFY_AGE: '⚠️',
     MINOR: '🚫',
     BANNED: '⛔',
+    BAN_CHECK_FAILED: '⚠️',
   }
   const verdictMsg: Record<string, string> = {
     ALLOWED: 'Player may enter.',
     VERIFY_AGE: 'Age uncertain — request physical ID before granting access.',
     MINOR: 'Access denied — underage player.',
     BANNED: 'Access denied — player is self-excluded.',
+    BAN_CHECK_FAILED: 'Banned-registry check unavailable — deny access or verify the exclusion list manually.',
   }
 
   // Backend reports age as { Low, High } range. Use the midpoint as the
@@ -92,10 +94,20 @@ export function Scan() {
             </div>
             <div className="metric-row">
               <span className="metric-label">Ban Match</span>
-              <span className={`metric-value ${result.ban.detected ? 'red' : 'green'}`}>
-                {result.ban.detected ? `YES (${result.ban.similarity?.toFixed(1)}%)` : 'NO'}
+              <span className={`metric-value ${result.ban.detected ? 'red' : result.ban.checkFailed ? 'amber' : 'green'}`}>
+                {result.ban.checkFailed
+                  ? 'CHECK FAILED'
+                  : result.ban.detected
+                    ? `YES (${result.ban.similarity?.toFixed(1)}%)`
+                    : 'NO'}
               </span>
             </div>
+            {result.ban.detected && result.ban.externalId && (
+              <div className="metric-row">
+                <span className="metric-label">Matched Player</span>
+                <span className="metric-value red">{result.ban.externalId}</span>
+              </div>
+            )}
             <div className="metric-row">
               <span className="metric-label">Face Confidence</span>
               <span className="metric-value">{result.faceConfidence.toFixed(1)}%</span>
