@@ -33,10 +33,18 @@ playguard/
 └── README.md
 ```
 
-**Security model**: the SPA never holds the API key. It calls same-origin
-`/api/proxy/playguard/*`. The edge function injects `X-API-Key` and forwards
-to `PG_API_URL`. CORS on the backend is whitelisted to the SPA origin and
-the Congo Gaming domains.
+**Security model**: two layers.
+1. **Operator session** — the SPA prompts for `PG_OPERATOR_PIN` once per tab
+   session; `POST /api/auth` (edge) verifies it and returns an HMAC-signed
+   token (`pg1.<expiry>.<sig>`, 12h TTL). Every `/api/proxy/*` call must carry
+   it in `X-PG-Token`; expired/invalid → 401 and the SPA shows the PIN gate.
+2. **API key** — held server-side only. The edge function injects
+   `X-API-Key`/`x-playguard-key` and forwards to `PG_API_URL`. The upstream
+   path is restricted to `/playguard/*` (`..` segments rejected) so the key
+   can never reach other routes on the backend host.
+
+CORS on the backend is whitelisted to the SPA origin and the Congo Gaming
+domains.
 
 ---
 
@@ -90,6 +98,8 @@ Flush offline queue to DynamoDB (call when connectivity is restored).
 | Variable               | Default                  | Description                         |
 |------------------------|--------------------------|-------------------------------------|
 | `PG_API_KEY`           | `change-me`              | Auth key for all endpoints          |
+| `PG_OPERATOR_PIN`      | —                        | Operator PIN checked by `/api/auth` |
+| `PG_PROXY_SECRET`      | —                        | HMAC secret signing session tokens  |
 | `AWS_REGION`           | `af-south-1`             | AWS region                          |
 | `AWS_ACCESS_KEY_ID`    | —                        | AWS credential                      |
 | `AWS_SECRET_ACCESS_KEY`| —                        | AWS credential                      |
@@ -169,8 +179,9 @@ npm run dev               # node --watch server.js on port 3007
 cd ..
 npm install
 npm run dev               # http://localhost:3007 (Vite dev server)
-# In dev, /api/proxy is unavailable. Either deploy a preview to Vercel or
-# point the SPA temporarily at the backend (edit src/services/api.ts).
+# In dev, /api/proxy and /api/auth are unavailable (edge functions run on
+# Vercel). Deploy a preview, or point the SPA temporarily at the backend
+# (edit src/services/api.ts) and bypass the PIN gate in src/App.tsx.
 ```
 
 ## Deployment (Vercel)
@@ -183,6 +194,8 @@ in any committed file):
 | `PG_API_URL`   | Upstream PlayGuard backend URL                  |
 | `PG_API_KEY`   | Real API key — never exposed to the browser     |
 | `PG_TENANT_ID` | (Optional) injected on every JSON request body  |
+| `PG_OPERATOR_PIN` | Operator PIN — required by `/api/auth`       |
+| `PG_PROXY_SECRET` | Session-signing secret (`openssl rand -hex 32`) |
 
 ---
 

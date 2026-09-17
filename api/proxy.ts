@@ -2,6 +2,8 @@
 // @types/node (Vercel edge runtime exposes process.env at runtime).
 declare const process: { env: Record<string, string | undefined> };
 
+import { json, verifyToken } from './_session';
+
 // Vercel Edge Function — server-side proxy to the PlayGuard backend.
 //
 // Why this exists:
@@ -39,6 +41,7 @@ const STRIP_REQ = new Set([
   'authorization',
   'x-api-key',
   'x-playguard-key',
+  'x-pg-token',
   'x-vercel-id',
   'x-vercel-deployment-url',
   'x-forwarded-for',
@@ -55,6 +58,28 @@ const STRIP_RES = new Set([
 ]);
 
 export default async function handler(req: Request): Promise<Response> {
+  // CORS preflight — no data is exposed by answering it.
+  if (req.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+        'access-control-allow-headers': 'Content-Type,X-PG-Token',
+      },
+    });
+  }
+
+  // Operator session gate — without it this function is an open relay that
+  // would forward the server-side API key to anyone. Token comes from
+  // POST /api/auth (operator PIN → signed token).
+  const secret = process.env.PG_PROXY_SECRET;
+  if (!secret) {
+    return json({ error: 'Proxy misconfigured — PG_PROXY_SECRET missing' }, 500);
+  }
+  if (!(await verifyToken(req.headers.get('x-pg-token'), secret))) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+
   const url = new URL(req.url);
 
   // Vercel rewrites /api/proxy/<sub-path> → /api/proxy?_subpath=<sub-path>
@@ -70,6 +95,13 @@ export default async function handler(req: Request): Promise<Response> {
   } else if (url.pathname.startsWith(ALLOWED_PREFIX)) {
     subPath = url.pathname.slice(ALLOWED_PREFIX.length) || '/';
   } else {
+    return json({ error: 'Not found' }, 404);
+  }
+
+  // Only /playguard/* upstream paths are reachable. The injected API key must
+  // never be forwarded to other routes on the upstream host, and '..' segments
+  // would normalize outside the prefix at fetch time (e.g. /playguard/../admin).
+  if (!/^\/playguard(\/|$)/.test(subPath) || subPath.split('/').includes('..')) {
     return json({ error: 'Not found' }, 404);
   }
 
@@ -150,12 +182,5 @@ export default async function handler(req: Request): Promise<Response> {
     status: upstream.status,
     statusText: upstream.statusText,
     headers: resHeaders,
-  });
-}
-
-function json(payload: unknown, status: number): Response {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { 'content-type': 'application/json' },
   });
 }
